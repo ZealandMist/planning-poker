@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Holman — Planning Poker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<style>
+  :root{
+    /* Romance In Paris — schemecolor.com/romance-in-paris.php */
+    --purple:#dad5e7;   /* Subtle Purple */
+    --white:#fdf6ec;    /* Silent White */
+    --melon:#f6d2cb;    /* Soft Melon */
+    --rose:#f6bad3;     /* Pastel Rose */
+    --lilac:#da97d4;    /* Sweet Lilac */
+    --ink:#4a2f52;      /* deep plum, mixed in for text contrast — the 5 scheme colors are all pale */
+    --ink-soft:#8a6b8f;
+    --shadow:rgba(150,90,150,0.22);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:
+      radial-gradient(ellipse at 50% -10%, var(--white) 0%, var(--purple) 55%, var(--melon) 100%);
+    background-attachment:fixed;
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:32px 20px 60px;
+    overflow-x:hidden;
+  }
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background-image:
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.4) 0px, rgba(255,255,255,0.4) 1px, transparent 1px, transparent 12px);
+    pointer-events:none;
+    z-index:0;
+  }
+
+  header{
+    text-align:center;
+    margin-bottom:6px;
+    z-index:1;
+    position:relative;
+  }
+  .eyebrow{
+    font-family:'Space Mono',monospace;
+    font-size:11px;
+    letter-spacing:0.28em;
+    text-transform:uppercase;
+    color:var(--lilac);
+    opacity:0.95;
+  }
+  h1{
+    font-family:'Fraunces',serif;
+    font-weight:700;
+    font-size:clamp(32px,5vw,52px);
+    letter-spacing:-0.01em;
+    margin-top:4px;
+    color:var(--ink);
+  }
+  h1 em{
+    font-style:italic;
+    color:var(--lilac);
+    font-weight:600;
+  }
+  .subtitle{
+    font-size:14px;
+    color:var(--ink-soft);
+    margin-top:6px;
+    max-width:440px;
+  }
+
+  main{
+    width:100%;
+    max-width:720px;
+    z-index:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:34px;
+    margin-top:28px;
+  }
+
+  /* --- Story row --- */
+  .story-row{
+    display:flex;
+    gap:10px;
+    width:100%;
+    max-width:520px;
+    align-items:center;
+  }
+  .story-row input{
+    flex:1;
+    background:rgba(255,255,255,0.55);
+    border:1px solid rgba(218,151,212,0.4);
+    border-radius:10px;
+    padding:12px 14px;
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    font-size:14px;
+  }
+  .story-row input::placeholder{color:var(--ink-soft); opacity:0.6;}
+  .story-row input:focus{outline:none; border-color:var(--lilac);}
+
+  /* --- Poker chip timer --- */
+  .chip-wrap{
+    position:relative;
+    width:216px;
+    height:216px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .chip-wrap svg{ position:absolute; inset:0; transform:rotate(-90deg); }
+  .chip-track{ fill:none; stroke:rgba(74,47,82,0.12); stroke-width:10; }
+  .chip-progress{
+    fill:none;
+    stroke:url(#goldGrad);
+    stroke-width:10;
+    stroke-linecap:round;
+    transition:stroke-dashoffset 0.25s linear;
+  }
+  .chip-face{
+    position:absolute;
+    inset:20px;
+    border-radius:50%;
+    background:
+      radial-gradient(circle at 35% 30%, #ffffff, var(--purple) 75%);
+    border:2px dashed rgba(218,151,212,0.55);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    box-shadow:inset 0 0 20px rgba(218,151,212,0.25), 0 10px 26px var(--shadow);
+  }
+  .timer-digits{
+    font-family:'Space Mono',monospace;
+    font-size:38px;
+    font-weight:700;
+    letter-spacing:0.02em;
+    color:var(--ink);
+    font-variant-numeric:tabular-nums;
+  }
+  .timer-state{
+    font-family:'Space Mono',monospace;
+    font-size:10px;
+    letter-spacing:0.2em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+    margin-top:4px;
+  }
+  .chip-wrap.pulsing .chip-face{ animation:pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse{
+    0%,100%{ box-shadow:inset 0 0 20px rgba(218,151,212,0.25), 0 10px 26px var(--shadow); }
+    50%{ box-shadow:inset 0 0 20px rgba(218,151,212,0.25), 0 10px 40px rgba(218,151,212,0.45); }
+  }
+
+  /* --- Controls --- */
+  .controls{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    flex-wrap:wrap;
+    justify-content:center;
+  }
+  .btn{
+    font-family:'Space Mono',monospace;
+    font-size:12px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    padding:11px 20px;
+    border-radius:8px;
+    border:1px solid rgba(218,151,212,0.5);
+    background:rgba(218,151,212,0.1);
+    color:var(--ink);
+    cursor:pointer;
+    transition:all 0.15s ease;
+  }
+  .btn:hover{ background:rgba(218,151,212,0.22); transform:translateY(-1px); }
+  .btn:active{ transform:translateY(0); }
+  .btn.primary{
+    background:var(--lilac);
+    color:var(--white);
+    border-color:var(--lilac);
+    font-weight:700;
+  }
+  .btn.primary:hover{ background:#c97fc2; }
+  .btn:disabled{ opacity:0.35; cursor:not-allowed; transform:none; }
+
+  .duration-select{
+    display:flex;
+    gap:6px;
+    font-family:'Space Mono',monospace;
+    font-size:11px;
+  }
+  .duration-select button{
+    background:none;
+    border:1px solid rgba(74,47,82,0.2);
+    color:var(--ink-soft);
+    padding:6px 10px;
+    border-radius:6px;
+    cursor:pointer;
+  }
+  .duration-select button.active{
+    border-color:var(--lilac);
+    color:var(--ink);
+    background:rgba(218,151,212,0.15);
+  }
+
+  /* --- Music toggle (vinyl) --- */
+  .vinyl-toggle{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    cursor:pointer;
+    user-select:none;
+    font-family:'Space Mono',monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+    letter-spacing:0.05em;
+  }
+  .vinyl{
+    width:30px; height:30px;
+    border-radius:50%;
+    background:
+      radial-gradient(circle at center, var(--rose) 0 4px, #4a2f52 5px, #4a2f52 9px, #6d4a74 10px, #4a2f52 11px, #4a2f52 100%);
+    border:1px solid rgba(218,151,212,0.4);
+    transition:transform 0.2s ease;
+  }
+  .vinyl.spinning{ animation:spin 2.4s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* --- Players --- */
+  .players-section{ width:100%; }
+  .section-label{
+    font-family:'Space Mono',monospace;
+    font-size:11px;
+    letter-spacing:0.2em;
+    text-transform:uppercase;
+    color:var(--lilac);
+    margin-bottom:12px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .section-label::after{
+    content:"";
+    flex:1;
+    height:1px;
+    background:rgba(218,151,212,0.3);
+  }
+
+  .add-player-row{
+    display:flex;
+    gap:8px;
+    margin-bottom:16px;
+  }
+  .add-player-row input{
+    flex:1;
+    background:rgba(255,255,255,0.55);
+    border:1px solid rgba(218,151,212,0.35);
+    border-radius:8px;
+    padding:9px 12px;
+    color:var(--ink);
+    font-size:13px;
+  }
+  .add-player-row input:focus{ outline:none; border-color:var(--lilac); }
+
+  .players-grid{
+    display:flex;
+    flex-wrap:wrap;
+    gap:12px;
+  }
+  .player-card{
+    background:rgba(255,255,255,0.45);
+    border:1px solid rgba(218,151,212,0.25);
+    border-radius:12px;
+    padding:12px 14px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:8px;
+    min-width:96px;
+    cursor:pointer;
+    transition:border-color 0.15s ease, background 0.15s ease;
+    position:relative;
+  }
+  .player-card:hover{ border-color:rgba(218,151,212,0.5); }
+  .player-card.active-turn{
+    border-color:var(--lilac);
+    background:rgba(218,151,212,0.16);
+    box-shadow:0 0 0 1px rgba(218,151,212,0.35);
+  }
+  .player-name{ font-size:12.5px; font-weight:600; color:var(--ink); }
+  .player-remove{
+    position:absolute; top:4px; right:6px;
+    font-size:12px; color:rgba(74,47,82,0.3);
+    background:none; border:none; cursor:pointer;
+    line-height:1;
+  }
+  .player-remove:hover{ color:#c9457a; }
+
+  .mini-card{
+    width:38px; height:52px;
+    border-radius:5px;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Fraunces',serif;
+    font-weight:700;
+    font-size:15px;
+    transition:transform 0.4s cubic-bezier(.2,.8,.3,1.2);
+    transform-style:preserve-3d;
+  }
+  .mini-card.hidden-back{
+    background:
+      repeating-linear-gradient(135deg, var(--rose) 0 4px, var(--lilac) 4px 8px);
+    border:1px solid rgba(218,151,212,0.5);
+    color:transparent;
+  }
+  .mini-card.hidden-back::after{
+    content:"♥";
+    color:rgba(255,255,255,0.75);
+    font-size:13px;
+  }
+  .mini-card.revealed{
+    background:var(--white);
+    color:var(--ink);
+    border:1px solid rgba(74,47,82,0.15);
+    animation:flip 0.5s ease;
+  }
+  .mini-card.empty{
+    background:rgba(255,255,255,0.25);
+    border:1px dashed rgba(74,47,82,0.15);
+  }
+  @keyframes flip{
+    0%{ transform:rotateY(90deg); }
+    100%{ transform:rotateY(0deg); }
+  }
+
+  /* --- Deck / card fan --- */
+  .deck-section{ width:100%; text-align:center; }
+  .deck-fan{
+    display:flex;
+    justify-content:center;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-top:14px;
+  }
+  .estimate-card{
+    width:64px; height:92px;
+    border-radius:8px;
+    background:var(--white);
+    color:var(--ink);
+    border:1px solid rgba(74,47,82,0.12);
+    font-family:'Fraunces',serif;
+    font-weight:700;
+    font-size:24px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    box-shadow:0 6px 14px var(--shadow);
+    transition:transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    position:relative;
+  }
+  .estimate-card::before{
+    content:attr(data-val);
+    position:absolute;
+    top:5px; left:7px;
+    font-size:11px;
+    color:#c9457a;
+  }
+  .estimate-card:hover{ transform:translateY(-8px); box-shadow:0 14px 22px var(--shadow); }
+  .estimate-card.selected{
+    transform:translateY(-14px);
+    border-color:var(--lilac);
+    box-shadow:0 0 0 2px var(--lilac), 0 14px 22px var(--shadow);
+  }
+  .estimate-card:disabled, .estimate-card.disabled{
+    opacity:0.4; cursor:not-allowed; transform:none; box-shadow:0 6px 14px var(--shadow);
+  }
+
+  .current-voter{
+    font-size:13px;
+    color:var(--ink-soft);
+    margin-top:2px;
+  }
+  .current-voter strong{ color:var(--lilac); }
+
+  /* --- Results --- */
+  .results{
+    width:100%;
+    background:rgba(255,255,255,0.4);
+    border:1px solid rgba(218,151,212,0.3);
+    border-radius:14px;
+    padding:20px 24px;
+    display:none;
+  }
+  .results.show{ display:block; }
+  .results-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    margin-bottom:10px;
+  }
+  .results-header h3{
+    font-family:'Fraunces',serif;
+    font-size:18px;
+    color:var(--lilac);
+  }
+  .avg-badge{
+    font-family:'Space Mono',monospace;
+    font-size:13px;
+    color:var(--ink);
+  }
+  .results-list{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .result-chip{
+    background:rgba(218,151,212,0.1);
+    border:1px solid rgba(218,151,212,0.3);
+    border-radius:8px;
+    padding:6px 12px;
+    font-size:12.5px;
+    display:flex;
+    gap:8px;
+    align-items:center;
+  }
+  .result-chip b{ color:var(--lilac); font-family:'Space Mono',monospace; }
+  .consensus-flag{
+    margin-top:12px;
+    font-size:12.5px;
+    color:var(--ink-soft);
+  }
+
+  footer{
+    margin-top:40px;
+    font-size:11px;
+    color:var(--ink-soft);
+    opacity:0.6;
+    font-family:'Space Mono',monospace;
+    letter-spacing:0.05em;
+    z-index:1;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .vinyl.spinning{ animation:none; }
+    .chip-wrap.pulsing .chip-face{ animation:none; }
+    .mini-card.revealed{ animation:none; }
+  }
+
+  @media (max-width:480px){
+    .estimate-card{ width:54px; height:78px; font-size:20px; }
+    .chip-wrap{ width:180px; height:180px; }
+    .timer-digits{ font-size:30px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Round &amp; Reveal</div>
+  <h1>Planning <em>Stakes</em></h1>
+  <p class="subtitle">Planning poker with a chip timer and a table that hums while the clock runs.</p>
+</header>
+
+<main>
+
+  <div class="story-row">
+    <input id="storyInput" type="text" placeholder="What are we estimating? (e.g. JIRA-142: refactor auth)" maxlength="120">
+  </div>
+
+  <div class="chip-wrap" id="chipWrap">
+    <svg viewBox="0 0 216 216">
+      <defs>
+        <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#f6bad3"/>
+          <stop offset="100%" stop-color="#da97d4"/>
+        </linearGradient>
+      </defs>
+      <circle class="chip-track" cx="108" cy="108" r="96"></circle>
+      <circle class="chip-progress" id="chipProgress" cx="108" cy="108" r="96"
+        stroke-dasharray="603.19" stroke-dashoffset="0"></circle>
+    </svg>
+    <div class="chip-face">
+      <div class="timer-digits" id="timerDigits">01:00</div>
+      <div class="timer-state" id="timerState">Ready</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="duration-select" id="durationSelect">
+      <button data-secs="30">30s</button>
+      <button data-secs="60" class="active">60s</button>
+      <button data-secs="90">90s</button>
+      <button data-secs="120">2m</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn primary" id="startBtn">Start Round</button>
+    <button class="btn" id="pauseBtn" disabled>Pause</button>
+    <button class="btn" id="resetBtn">Reset</button>
+    <div class="vinyl-toggle" id="musicToggle">
+      <div class="vinyl" id="vinylIcon"></div>
+      <span id="musicLabel">Table music: on</span>
+    </div>
+  </div>
+
+  <section class="players-section">
+    <div class="section-label">Players at the table</div>
+    <div class="add-player-row">
+      <input id="playerNameInput" type="text" placeholder="Add a player…" maxlength="24">
+      <button class="btn" id="addPlayerBtn">Add</button>
+    </div>
+    <div class="players-grid" id="playersGrid"></div>
+  </section>
+
+  <section class="deck-section">
+    <div class="section-label">The deck</div>
+    <div class="current-voter" id="currentVoter"></div>
+    <div class="deck-fan" id="deckFan"></div>
+  </section>
+
+  <div class="results" id="results">
+    <div class="results-header">
+      <h3>Reveal</h3>
+      <div class="avg-badge" id="avgBadge"></div>
+    </div>
+    <div class="results-list" id="resultsList"></div>
+    <div class="consensus-flag" id="consensusFlag"></div>
+  </div>
+
+</main>
+
+<footer>No accounts, no server — everything lives in this tab.</footer>
+
+<script>
+(function(){
+  const DECK = ["0","1","2","3","5","8","13","21","?","☕"];
+
+  let players = [];       // {id, name, vote}
+  let currentPlayerIdx = 0;
+  let revealed = false;
+
+  let durationSecs = 60;
+  let remaining = durationSecs;
+  let timerInterval = null;
+  let timerRunning = false;
+  let musicOn = true;
+
+  // ---------- DOM refs ----------
+  const playersGrid = document.getElementById('playersGrid');
+  const deckFan = document.getElementById('deckFan');
+  const currentVoterEl = document.getElementById('currentVoter');
+  const timerDigits = document.getElementById('timerDigits');
+  const timerState = document.getElementById('timerState');
+  const chipProgress = document.getElementById('chipProgress');
+  const chipWrap = document.getElementById('chipWrap');
+  const startBtn = document.getElementById('startBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const musicToggle = document.getElementById('musicToggle');
+  const vinylIcon = document.getElementById('vinylIcon');
+  const musicLabel = document.getElementById('musicLabel');
+  const resultsBox = document.getElementById('results');
+  const resultsList = document.getElementById('resultsList');
+  const avgBadge = document.getElementById('avgBadge');
+  const consensusFlag = document.getElementById('consensusFlag');
+  const durationSelect = document.getElementById('durationSelect');
+
+  const CIRC = 2 * Math.PI * 96;
+
+  // ---------- Seed a couple of default players ----------
+  function uid(){ return Math.random().toString(36).slice(2,9); }
+  players.push({id:uid(), name:"You", vote:null});
+
+  // ---------- Rendering ----------
+  function renderPlayers(){
+    playersGrid.innerHTML = "";
+    players.forEach((p, idx) => {
+      const card = document.createElement('div');
+      card.className = 'player-card' + (idx === currentPlayerIdx && !revealed ? ' active-turn' : '');
+      card.innerHTML = `
+        <button class="player-remove" title="Remove player">✕</button>
+        <div class="player-name">${escapeHtml(p.name)}</div>
+        <div class="mini-card ${miniCardClass(p)}">${revealed && p.vote ? p.vote : ''}</div>
+      `;
+      card.querySelector('.player-remove').addEventListener('click', (e) => {
+        e.stopPropagation();
+        removePlayer(p.id);
+      });
+      card.addEventListener('click', () => {
+        currentPlayerIdx = idx;
+        renderPlayers();
+        renderVoterLabel();
+      });
+      playersGrid.appendChild(card);
+    });
+  }
+
+  function miniCardClass(p){
+    if (revealed && p.vote) return 'revealed';
+    if (p.vote) return 'hidden-back';
+    return 'empty';
+  }
+
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function removePlayer(id){
+    players = players.filter(p => p.id !== id);
+    if (currentPlayerIdx >= players.length) currentPlayerIdx = Math.max(0, players.length - 1);
+    renderPlayers();
+    renderVoterLabel();
+  }
+
+  function renderVoterLabel(){
+    if (players.length === 0){
+      currentVoterEl.innerHTML = "Add a player to start voting.";
+      return;
+    }
+    const p = players[currentPlayerIdx];
+    currentVoterEl.innerHTML = revealed
+      ? "Round revealed — reset to play another."
+      : `Voting as <strong>${escapeHtml(p.name)}</strong>`;
+  }
+
+  function renderDeck(){
+    deckFan.innerHTML = "";
+    DECK.forEach(val => {
+      const btn = document.createElement('button');
+      btn.className = 'estimate-card';
+      btn.textContent = val;
+      btn.setAttribute('data-val', val);
+      const p = players[currentPlayerIdx];
+      if (revealed || !p) btn.classList.add('disabled');
+      if (p && p.vote === val) btn.classList.add('selected');
+      btn.addEventListener('click', () => {
+        if (revealed || !players[currentPlayerIdx]) return;
+        players[currentPlayerIdx].vote = val;
+        renderPlayers();
+        renderDeck();
+      });
+      deckFan.appendChild(btn);
+    });
+  }
+
+  // ---------- Add player ----------
+  document.getElementById('addPlayerBtn').addEventListener('click', addPlayerFromInput);
+  document.getElementById('playerNameInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addPlayerFromInput();
+  });
+  function addPlayerFromInput(){
+    const input = document.getElementById('playerNameInput');
+    const name = input.value.trim();
+    if (!name) return;
+    players.push({id:uid(), name, vote:null});
+    input.value = "";
+    renderPlayers();
+    renderVoterLabel();
+    renderDeck();
+  }
+
+  // ---------- Timer ----------
+  function formatTime(s){
+    const m = Math.floor(s/60).toString().padStart(2,'0');
+    const sec = (s%60).toString().padStart(2,'0');
+    return `${m}:${sec}`;
+  }
+
+  function updateChip(){
+    timerDigits.textContent = formatTime(remaining);
+    const frac = remaining / durationSecs;
+    chipProgress.style.strokeDasharray = CIRC;
+    chipProgress.style.strokeDashoffset = CIRC * (1 - frac);
+  }
+
+  function startTimer(){
+    if (timerRunning) return;
+    timerRunning = true;
+    timerState.textContent = "Voting…";
+    chipWrap.classList.add('pulsing');
+    startBtn.disabled = true;
+    pauseBtn.disabled = false;
+    ensureAudioStarted();
+    if (musicOn) startMusic();
+    timerInterval = setInterval(() => {
+      remaining--;
+      updateChip();
+      if (remaining <= 0){
+        clearInterval(timerInterval);
+        timerRunning = false;
+        timerState.textContent = "Time!";
+        chipWrap.classList.remove('pulsing');
+        pauseBtn.disabled = true;
+        startBtn.disabled = true;
+        stopMusic();
+        playChime();
+        revealVotes();
+      }
+    }, 1000);
+  }
+
+  function pauseTimer(){
+    if (!timerRunning) return;
+    clearInterval(timerInterval);
+    timerRunning = false;
+    timerState.textContent = "Paused";
+    chipWrap.classList.remove('pulsing');
+    pauseBtn.disabled = true;
+    startBtn.disabled = false;
+    startBtn.textContent = "Resume";
+    stopMusic();
+  }
+
+  function resetTimer(){
+    clearInterval(timerInterval);
+    timerRunning = false;
+    remaining = durationSecs;
+    updateChip();
+    timerState.textContent = "Ready";
+    chipWrap.classList.remove('pulsing');
+    startBtn.disabled = false;
+    startBtn.textContent = "Start Round";
+    pauseBtn.disabled = true;
+    stopMusic();
+    revealed = false;
+    players.forEach(p => p.vote = p.vote); // keep votes, just re-hide
+    resultsBox.classList.remove('show');
+    renderPlayers();
+    renderDeck();
+    renderVoterLabel();
+  }
+
+  function newRound(){
+    players.forEach(p => p.vote = null);
+    revealed = false;
+    resultsBox.classList.remove('show');
+    currentPlayerIdx = 0;
+    resetTimer();
+  }
+
+  startBtn.addEventListener('click', startTimer);
+  pauseBtn.addEventListener('click', pauseTimer);
+  resetBtn.addEventListener('click', newRound);
+
+  durationSelect.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    [...durationSelect.children].forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    durationSecs = parseInt(btn.getAttribute('data-secs'), 10);
+    if (!timerRunning){
+      remaining = durationSecs;
+      updateChip();
+    }
+  });
+
+  // ---------- Reveal ----------
+  function revealVotes(){
+    revealed = true;
+    renderPlayers();
+    renderDeck();
+    renderVoterLabel();
+    showResults();
+  }
+
+  function showResults(){
+    const voted = players.filter(p => p.vote && p.vote !== '?' && p.vote !== '☕');
+    resultsList.innerHTML = "";
+    players.forEach(p => {
+      const chip = document.createElement('div');
+      chip.className = 'result-chip';
+      chip.innerHTML = `${escapeHtml(p.name)} <b>${p.vote ? p.vote : '—'}</b>`;
+      resultsList.appendChild(chip);
+    });
+    if (voted.length){
+      const nums = voted.map(p => parseFloat(p.vote)).filter(n => !isNaN(n));
+      const avg = nums.length ? (nums.reduce((a,b)=>a+b,0) / nums.length) : null;
+      avgBadge.textContent = avg !== null ? `avg ${avg.toFixed(1)}` : "";
+      const allSame = voted.every(p => p.vote === voted[0].vote) && voted.length === players.length;
+      consensusFlag.textContent = allSame && players.length > 1
+        ? "Consensus reached — everyone's aligned."
+        : "Spread the estimates and talk through the gap before locking it in.";
+    } else {
+      avgBadge.textContent = "";
+      consensusFlag.textContent = "No votes cast this round.";
+    }
+    resultsBox.classList.add('show');
+  }
+
+  // Allow manual reveal even before timer ends (double-click chip)
+  chipWrap.addEventListener('dblclick', () => {
+    if (revealed) return;
+    clearInterval(timerInterval);
+    timerRunning = false;
+    startBtn.disabled = true;
+    pauseBtn.disabled = true;
+    timerState.textContent = "Revealed early";
+    chipWrap.classList.remove('pulsing');
+    stopMusic();
+    revealVotes();
+  });
+
+  // ---------- Audio: generative table music + chime ----------
+  let audioStarted = false;
+  let musicLoop = null;
+  let padSynth = null;
+  let plinkSynth = null;
+
+  function ensureAudioStarted(){
+    if (audioStarted) return;
+    if (typeof Tone === 'undefined') return;
+    Tone.start();
+    audioStarted = true;
+    padSynth = new Tone.PolySynth(Tone.FMSynth, {
+      volume: -18,
+      envelope: { attack: 1.2, decay: 0.6, sustain: 0.6, release: 2.2 }
+    }).toDestination();
+    plinkSynth = new Tone.PluckSynth({
+      volume: -22,
+      attackNoise: 0.6,
+      dampening: 3500,
+      resonance: 0.85
+    }).toDestination();
+  }
+
+  const chordPool = [
+    ["C3","E3","G3","B3"],
+    ["A2","C3","E3","G3"],
+    ["F2","A2","C3","E3"],
+    ["G2","B2","D3","F3"]
+  ];
+  const pluckNotes = ["C5","D5","E5","G5","A5"];
+
+  function startMusic(){
+    if (typeof Tone === 'undefined' || !audioStarted) return;
+    if (Tone.Transport.state === 'started' && musicLoop) return;
+    let chordIdx = 0;
+    musicLoop = new Tone.Loop(time => {
+      const chord = chordPool[chordIdx % chordPool.length];
+      padSynth.triggerAttackRelease(chord, "2n", time);
+      chordIdx++;
+      if (Math.random() > 0.4){
+        const note = pluckNotes[Math.floor(Math.random()*pluckNotes.length)];
+        plinkSynth.triggerAttack(note, time + 0.5);
+      }
+    }, "2n").start(0);
+    Tone.Transport.bpm.value = 78;
+    Tone.Transport.start();
+    vinylIcon.classList.add('spinning');
+  }
+
+  function stopMusic(){
+    if (musicLoop){
+      musicLoop.stop();
+      musicLoop.dispose();
+      musicLoop = null;
+    }
+    if (typeof Tone !== 'undefined') Tone.Transport.stop();
+    vinylIcon.classList.remove('spinning');
+  }
+
+  function playChime(){
+    if (typeof Tone === 'undefined' || !audioStarted) return;
+    const bell = new Tone.MetalSynth({
+      volume: -10,
+      envelope: { attack: 0.001, decay: 1.2, release: 0.4 },
+      harmonicity: 5.1,
+      modulationIndex: 16,
+      resonance: 2000,
+      octaves: 1.2
+    }).toDestination();
+    const now = Tone.now();
+    bell.triggerAttack("C5", now);
+    bell.triggerAttack("E5", now + 0.15);
+    bell.triggerAttack("G5", now + 0.3);
+    setTimeout(() => bell.dispose(), 3000);
+  }
+
+  musicToggle.addEventListener('click', () => {
+    musicOn = !musicOn;
+    musicLabel.textContent = musicOn ? "Table music: on" : "Table music: off";
+    if (!musicOn) stopMusic();
+    else if (timerRunning) startMusic();
+  });
+
+  // ---------- Init ----------
+  updateChip();
+  renderPlayers();
+  renderVoterLabel();
+  renderDeck();
+})();
+</script>
+
+</body>
+</html>
