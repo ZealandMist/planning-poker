@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Table Stakes — Planning Poker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./assests/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Round &amp; Reveal</div>
+  <h1>Table <em>Stakes</em></h1>
+  <p class="subtitle">Planning poker with a chip timer and a table that hums while the clock runs.</p>
+</header>
+
+<!-- ================= LOBBY ================= -->
+<div id="lobbyCard"></div>
+
+<!-- ================= SESSION BAR ================= -->
+<div class="session-bar hidden" id="sessionBar">
+  <span class="role-badge" id="roleBadgeConn"><span class="conn-dot" id="connDot"></span><span id="connCountLabel">1 at the table</span></span>
+  <div class="code-pill">
+    Code: <b id="codeDisplay">—</b>
+    <button id="copyLinkBtn" type="button">Copy invite link</button>
+  </div>
+  <span class="role-badge" id="roleBadgeSelf"></span>
+  <button class="leave-link" id="leaveBtn">Leave</button>
+</div>
+
+<main class="hidden" id="appMain">
+
+  <div class="story-row">
+    <input id="storyInput" type="text" placeholder="What are we estimating? (e.g. JIRA-142: refactor auth)" maxlength="120">
+  </div>
+
+  <div class="chip-wrap" id="chipWrap">
+    <svg viewBox="0 0 216 216">
+      <defs>
+        <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#f6bad3"/>
+          <stop offset="100%" stop-color="#da97d4"/>
+        </linearGradient>
+      </defs>
+      <circle class="chip-track" cx="108" cy="108" r="96"></circle>
+      <circle class="chip-progress" id="chipProgress" cx="108" cy="108" r="96"
+        stroke-dasharray="603.19" stroke-dashoffset="0"></circle>
+    </svg>
+    <div class="chip-face">
+      <div class="timer-digits" id="timerDigits">01:00</div>
+      <div class="timer-state" id="timerState">Ready</div>
+    </div>
+  </div>
+
+  <div class="controls" id="hostTimerControls">
+    <div class="duration-select" id="durationSelect">
+      <button data-secs="30">30s</button>
+      <button data-secs="60" class="active">60s</button>
+      <button data-secs="90">90s</button>
+      <button data-secs="120">2m</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div id="hostButtonsWrap" class="controls" style="gap:14px;">
+      <button class="btn primary" id="startBtn">Start Round</button>
+      <button class="btn" id="pauseBtn" disabled>Pause</button>
+      <button class="btn" id="revealBtn">Reveal Now</button>
+    </div>
+    <div class="waiting-note hidden" id="guestWaitingNote">Only the host controls the timer.</div>
+    <div class="vinyl-toggle" id="musicToggle">
+      <div class="vinyl" id="vinylIcon"></div>
+      <span id="musicLabel">Table music: on</span>
+    </div>
+  </div>
+
+  <section class="players-section">
+    <div class="section-label">Players at the table</div>
+    <div class="players-grid" id="playersGrid"></div>
+  </section>
+
+  <section class="deck-section">
+    <div class="section-label">The deck</div>
+    <div class="current-voter" id="currentVoter"></div>
+    <div class="deck-fan" id="deckFan"></div>
+  </section>
+
+  <div class="results" id="results">
+    <div class="results-header">
+      <h3>Reveal</h3>
+      <div class="avg-badge" id="avgBadge"></div>
+    </div>
+    <div class="results-list" id="resultsList"></div>
+    <div class="consensus-flag" id="consensusFlag"></div>
+  </div>
+
+</main>
+
+<footer id="pageFooter">No accounts, no server — this session lives peer-to-peer between browsers.</footer>
+
+<script src="app.js"></script>
+
+<script>
+(function(){
+  const DECK = ["0","1","2","3","5","8","13","21","?","☕"];
+  const CIRC = 2 * Math.PI * 96;
+
+  // ---------- DOM refs ----------
+  const lobbyCard = document.getElementById('lobbyCard');
+  const roleTabs = document.getElementById('roleTabs');
+  const nameInput = document.getElementById('nameInput');
+  const joinCodeField = document.getElementById('joinCodeField');
+  const codeInput = document.getElementById('codeInput');
+  const lobbySubmit = document.getElementById('lobbySubmit');
+  const lobbyError = document.getElementById('lobbyError');
+  const lobbyNote = document.getElementById('lobbyNote');
+
+  const sessionBar = document.getElementById('sessionBar');
+  const connDot = document.getElementById('connDot');
+  const connCountLabel = document.getElementById('connCountLabel');
+  const codeDisplay = document.getElementById('codeDisplay');
+  const copyLinkBtn = document.getElementById('copyLinkBtn');
+  const roleBadgeSelf = document.getElementById('roleBadgeSelf');
+  const leaveBtn = document.getElementById('leaveBtn');
+
+  const appMain = document.getElementById('appMain');
+  const storyInput = document.getElementById('storyInput');
+  const playersGrid = document.getElementById('playersGrid');
+  const deckFan = document.getElementById('deckFan');
+  const currentVoterEl = document.getElementById('currentVoter');
+  const timerDigits = document.getElementById('timerDigits');
+  const timerState = document.getElementById('timerState');
+  const chipProgress = document.getElementById('chipProgress');
+  const chipWrap = document.getElementById('chipWrap');
+  const startBtn = document.getElementById('startBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const revealBtn = document.getElementById('revealBtn');
+  const hostButtonsWrap = document.getElementById('hostButtonsWrap');
+  const guestWaitingNote = document.getElementById('guestWaitingNote');
+  const musicToggle = document.getElementById('musicToggle');
+  const vinylIcon = document.getElementById('vinylIcon');
+  const musicLabel = document.getElementById('musicLabel');
+  const resultsBox = document.getElementById('results');
+  const resultsList = document.getElementById('resultsList');
+  const avgBadge = document.getElementById('avgBadge');
+  const consensusFlag = document.getElementById('consensusFlag');
+  const durationSelect = document.getElementById('durationSelect');
+
+  // ---------- Networking state ----------
+  let peer = null;
+  let isHost = false;
+  let myId = null;          // = peer.id for everyone; also the key in state.players
+  let myName = "";
+  let sessionCode = null;
+  let conns = {};           // host only: peerId -> DataConnection
+  let hostConn = null;      // guest only: DataConnection to host
+
+  // ---------- Shared/canonical state ----------
+  // Only the host mutates this directly; guests receive it via broadcasts.
+  let state = {
+    story: "",
+    players: {},         // id -> {name, vote}
+    durationSecs: 60,
+    running: false,
+    endAt: null,          // epoch ms
+    remainingMs: null,    // used while paused
+    revealed: false
+  };
+
+  // Public STUN + free Open Relay Project TURN servers as a fallback for
+  // networks where a direct STUN-only connection can't get through
+  // (VPNs, symmetric NAT, some corporate firewalls). See openrelayproject.org.
+  const ICE_CONFIG = {
+    iceServers: [
+      { urls: "stun:stun.relay.metered.ca:80" },
+      { urls: "turn:global.relay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+      { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
+      { urls: "turn:global.relay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+      { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
+    ]
+  };
+
+  function uid(len){
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    let s = '';
+    for (let i=0;i<len;i++) s += chars[Math.floor(Math.random()*chars.length)];
+    return s;
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ================= LOBBY =================
+  let lobbyRole = 'host';
+  roleTabs.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    lobbyRole = btn.getAttribute('data-role');
+    [...roleTabs.children].forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    if (lobbyRole === 'join'){
+      joinCodeField.style.display = 'block';
+      lobbySubmit.textContent = 'Join session';
+      lobbyNote.textContent = "Ask the host for their session code, or use the link they shared.";
+    } else {
+      joinCodeField.style.display = 'none';
+      lobbySubmit.textContent = 'Start hosting';
+      lobbyNote.textContent = "You'll get a session code to share. Anyone with the link or code can join from their own device.";
+    }
+  });
+
+  // Pre-fill from ?session=CODE in the URL
+  const urlParams = new URLSearchParams(location.search);
+  const urlSession = urlParams.get('session');
+  if (urlSession){
+    lobbyRole = 'join';
+    [...roleTabs.children].forEach(b => b.classList.toggle('active', b.getAttribute('data-role') === 'join'));
+    joinCodeField.style.display = 'block';
+    codeInput.value = urlSession;
+    lobbySubmit.textContent = 'Join session';
+    lobbyNote.textContent = "Ask the host for their session code, or use the link they shared.";
+  }
+
+  lobbySubmit.addEventListener('click', () => {
+    const name = nameInput.value.trim();
+    if (!name){ lobbyError.textContent = "Enter a name first."; nameInput.focus(); return; }
+    myName = name;
+    lobbyError.textContent = "";
+    lobbySubmit.disabled = true;
+    lobbySubmit.textContent = "Connecting…";
+    ensureAudioStarted(); // unlock audio context on this user gesture
+
+    if (lobbyRole === 'host') startHosting();
+    else {
+      const code = codeInput.value.trim().toUpperCase();
+      if (!code){ lobbyError.textContent = "Enter a session code."; lobbySubmit.disabled = false; lobbySubmit.textContent = "Join session"; return; }
+      joinSession(code);
+    }
+  });
+
+  function showApp(){
+    lobbyCard.classList.add('hidden');
+    sessionBar.classList.remove('hidden');
+    appMain.classList.remove('hidden');
+    codeDisplay.textContent = sessionCode;
+    roleBadgeSelf.textContent = isHost ? "★ You're hosting" : "Playing as " + myName;
+    roleBadgeSelf.classList.toggle('host', isHost);
+    hostButtonsWrap.classList.toggle('hidden', !isHost);
+    guestWaitingNote.classList.toggle('hidden', isHost);
+    [...durationSelect.children].forEach(b => b.disabled = !isHost);
+    storyInput.disabled = !isHost;
+    storyInput.placeholder = isHost ? storyInput.placeholder : "Waiting for the host to set a story…";
+  }
+
+  function lobbyFail(msg){
+    lobbyError.textContent = msg;
+    lobbySubmit.disabled = false;
+    lobbySubmit.textContent = lobbyRole === 'host' ? 'Start hosting' : 'Join session';
+    if (peer && !peer.destroyed) peer.destroy();
+    peer = null;
+  }
+
+  // ================= HOST =================
+  function startHosting(attempt){
+    attempt = attempt || 0;
+    sessionCode = 'TS-' + uid(6);
+    peer = new Peer(sessionCode, { config: ICE_CONFIG });
+
+    peer.on('open', id => {
+      console.log('[table-stakes] hosting as', id);
+      isHost = true;
+      myId = id;
+      state.players[myId] = { name: myName, vote: null };
+      showApp();
+      render();
+    });
+
+    peer.on('connection', conn => {
+      console.log('[table-stakes] incoming connection from', conn.peer);
+      conns[conn.peer] = conn;
+      conn.on('data', data => handleHostMessage(conn, data));
+      conn.on('open', () => {
+        console.log('[table-stakes] connection open with', conn.peer);
+        conn.send({ type: 'state', state });
+      });
+      conn.on('close', () => {
+        console.log('[table-stakes] connection closed:', conn.peer);
+        delete conns[conn.peer];
+        delete state.players[conn.peer];
+        broadcastState();
+        render();
+      });
+      conn.on('error', err => console.error('[table-stakes] connection error with', conn.peer, err));
+    });
+
+    peer.on('disconnected', () => console.warn('[table-stakes] lost connection to signaling server, attempting reconnect…'));
+
+    peer.on('error', err => {
+      console.error('[table-stakes] peer error while hosting:', err.type, err);
+      if (err.type === 'unavailable-id' && attempt < 3){
+        startHosting(attempt + 1); // collision on the free public broker — try a fresh code
+      } else {
+        lobbyFail("Couldn't start a session (" + err.type + "). Check your connection and try again.");
+      }
+    });
+  }
+
+  function handleHostMessage(conn, data){
+    if (!data || !data.type) return;
+    if (data.type === 'join'){
+      state.players[conn.peer] = { name: (data.name || 'Guest').slice(0, 24), vote: null };
+      broadcastState();
+      render();
+    } else if (data.type === 'vote'){
+      if (state.players[conn.peer] && !state.revealed){
+        state.players[conn.peer].vote = data.vote;
+        broadcastState();
+        render();
+      }
+    } else if (data.type === 'leave'){
+      delete state.players[conn.peer];
+      delete conns[conn.peer];
+      broadcastState();
+      render();
+    }
+  }
+
+  function broadcastState(){
+    Object.values(conns).forEach(c => { if (c.open) c.send({ type: 'state', state }); });
+  }
+
+  // ================= GUEST =================
+  function joinSession(code){
+    sessionCode = code;
+    peer = new Peer({ config: ICE_CONFIG });
+
+    peer.on('open', id => {
+      console.log('[table-stakes] joining as', id, '-> target session', code);
+      myId = id;
+      isHost = false;
+      const conn = peer.connect(code, { reliable: true });
+      hostConn = conn;
+
+      const failTimer = setTimeout(() => {
+        console.error('[table-stakes] connect attempt timed out after 12s — likely a signaling/ICE issue or wrong code');
+        lobbyFail("Couldn't reach that session. Double-check the code with the host, and see the console (F12) for details.");
+      }, 12000);
+
+      conn.on('open', () => {
+        console.log('[table-stakes] connected to host', code);
+        clearTimeout(failTimer);
+        conn.send({ type: 'join', name: myName });
+        showApp();
+      });
+      conn.on('data', data => {
+        if (data.type === 'state'){
+          state = data.state;
+          render();
+        }
+      });
+      conn.on('close', () => {
+        console.log('[table-stakes] host closed the connection');
+        alert("The host ended the session.");
+        location.reload();
+      });
+      conn.on('error', err => {
+        console.error('[table-stakes] connection error:', err);
+        clearTimeout(failTimer);
+        lobbyFail("Couldn't reach that session. Double-check the code with the host.");
+      });
+    });
+
+    peer.on('disconnected', () => console.warn('[table-stakes] lost connection to signaling server, attempting reconnect…'));
+
+    peer.on('error', err => {
+      console.error('[table-stakes] peer error while joining:', err.type, err);
+      lobbyFail("Connection error (" + err.type + "). Try again.");
+    });
+  }
+
+  function sendToHost(msg){
+    if (hostConn && hostConn.open) hostConn.send(msg);
+  }
+
+  // ================= Leave / copy link =================
+  leaveBtn.addEventListener('click', () => {
+    if (isHost){
+      if (!confirm("End this session for everyone?")) return;
+    }
+    location.href = location.pathname;
+  });
+
+  copyLinkBtn.addEventListener('click', () => {
+    const url = location.origin + location.pathname + '?session=' + encodeURIComponent(sessionCode);
+    navigator.clipboard.writeText(url).then(() => {
+      const original = copyLinkBtn.textContent;
+      copyLinkBtn.textContent = 'Copied!';
+      setTimeout(() => copyLinkBtn.textContent = original, 1500);
+    }).catch(() => {
+      prompt("Copy this invite link:", url);
+    });
+  });
+
+  // ================= Story (host edits, broadcasts) =================
+  let storyDebounce = null;
+  storyInput.addEventListener('input', () => {
+    if (!isHost) return;
+    clearTimeout(storyDebounce);
+    storyDebounce = setTimeout(() => {
+      state.story = storyInput.value;
+      broadcastState();
+    }, 300);
+  });
+
+  // ================= Rendering =================
+  function render(){
+    connCountLabel.textContent = Object.keys(state.players).length + (Object.keys(state.players).length === 1 ? ' at the table' : ' at the table');
+    if (document.activeElement !== storyInput) storyInput.value = state.story || "";
+    renderPlayers();
+    renderDeck();
+    renderVoterLabel();
+    renderTimerButtons();
+    if (state.revealed) showResults(); else resultsBox.classList.remove('show');
+    syncMusicToState();
+  }
+
+  function renderPlayers(){
+    playersGrid.innerHTML = "";
+    const ids = Object.keys(state.players);
+    ids.forEach(id => {
+      const p = state.players[id];
+      const card = document.createElement('div');
+      card.className = 'player-card' + (id === myId ? ' is-you' : '');
+      const isThatHost = (isHost && id === myId) || (!isHost && id === sessionCode);
+      card.innerHTML = `
+        <div class="player-name">${escapeHtml(p.name)}${isThatHost ? '<span class="host-star">★</span>' : ''}</div>
+        <div class="mini-card ${miniCardClass(p)}">${state.revealed && p.vote ? p.vote : ''}</div>
+      `;
+      if (isHost && id !== myId){
+        const rm = document.createElement('button');
+        rm.className = 'player-remove';
+        rm.title = 'Remove player';
+        rm.textContent = '✕';
+        rm.addEventListener('click', () => {
+          if (conns[id]) conns[id].close();
+          delete state.players[id];
+          delete conns[id];
+          broadcastState();
+          render();
+        });
+        card.appendChild(rm);
+      }
+      playersGrid.appendChild(card);
+    });
+  }
+
+  function miniCardClass(p){
+    if (state.revealed && p.vote) return 'revealed';
+    if (p.vote) return 'hidden-back';
+    return 'empty';
+  }
+
+  function renderVoterLabel(){
+    currentVoterEl.innerHTML = state.revealed
+      ? "Round revealed — the host can start another."
+      : `Voting as <strong>${escapeHtml(myName)}</strong>`;
+  }
+
+  function renderDeck(){
+    deckFan.innerHTML = "";
+    const me = state.players[myId];
+    DECK.forEach(val => {
+      const btn = document.createElement('button');
+      btn.className = 'estimate-card';
+      btn.textContent = val;
+      btn.setAttribute('data-val', val);
+      if (state.revealed || !me) btn.classList.add('disabled');
+      if (me && me.vote === val) btn.classList.add('selected');
+      btn.addEventListener('click', () => {
+        if (state.revealed || !state.players[myId]) return;
+        castVote(val);
+      });
+      deckFan.appendChild(btn);
+    });
+  }
+
+  function castVote(val){
+    if (isHost){
+      state.players[myId].vote = val;
+      broadcastState();
+      render();
+    } else {
+      sendToHost({ type: 'vote', vote: val });
+      // optimistic local echo so the card feels responsive
+      if (state.players[myId]) state.players[myId].vote = val;
+      renderDeck();
+      renderPlayers();
+    }
+  }
+
+  // ================= Timer (host-authoritative) =================
+  let tickInterval = setInterval(tick, 250);
+
+  function formatTime(s){
+    s = Math.max(0, Math.round(s));
+    const m = Math.floor(s/60).toString().padStart(2,'0');
+    const sec = (s%60).toString().padStart(2,'0');
+    return `${m}:${sec}`;
+  }
+
+  function tick(){
+    let remaining;
+    if (state.running && state.endAt){
+      remaining = (state.endAt - Date.now()) / 1000;
+    } else if (state.remainingMs != null){
+      remaining = state.remainingMs / 1000;
+    } else {
+      remaining = state.durationSecs;
+    }
+    remaining = Math.max(0, remaining);
+
+    timerDigits.textContent = formatTime(remaining);
+    const frac = state.durationSecs ? remaining / state.durationSecs : 0;
+    chipProgress.style.strokeDashoffset = CIRC * (1 - frac);
+    chipWrap.classList.toggle('pulsing', !!state.running);
+
+    if (state.running && remaining <= 0.05){
+      timerState.textContent = "Time!";
+      if (isHost && !state.revealed){
+        state.running = false;
+        state.revealed = true;
+        broadcastState();
+        render();
+      }
+    } else if (state.revealed){
+      timerState.textContent = "Revealed";
+    } else if (state.running){
+      timerState.textContent = "Voting…";
+    } else if (state.remainingMs != null){
+      timerState.textContent = "Paused";
+    } else {
+      timerState.textContent = "Ready";
+    }
+  }
+
+  function renderTimerButtons(){
+    if (!isHost) return;
+    startBtn.disabled = !!state.running;
+    startBtn.textContent = (state.remainingMs != null && !state.running) ? "Resume" : "Start Round";
+    pauseBtn.disabled = !state.running;
+    revealBtn.disabled = state.revealed;
+    [...durationSelect.children].forEach(b => {
+      b.classList.toggle('active', parseInt(b.getAttribute('data-secs'),10) === state.durationSecs);
+    });
+  }
+
+  startBtn.addEventListener('click', () => {
+    if (!isHost || state.running) return;
+    if (startBtn.textContent === "Resume" && state.remainingMs != null){
+      state.endAt = Date.now() + state.remainingMs;
+      state.remainingMs = null;
+    } else {
+      // fresh round: clear votes, reset reveal
+      Object.values(state.players).forEach(p => p.vote = null);
+      state.revealed = false;
+      state.endAt = Date.now() + state.durationSecs * 1000;
+    }
+    state.running = true;
+    broadcastState();
+    render();
+  });
+
+  pauseBtn.addEventListener('click', () => {
+    if (!isHost || !state.running) return;
+    state.remainingMs = Math.max(0, state.endAt - Date.now());
+    state.running = false;
+    state.endAt = null;
+    broadcastState();
+    render();
+  });
+
+  revealBtn.addEventListener('click', () => {
+    if (!isHost || state.revealed) return;
+    state.running = false;
+    state.revealed = true;
+    broadcastState();
+    render();
+  });
+
+  durationSelect.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn || !isHost) return;
+    state.durationSecs = parseInt(btn.getAttribute('data-secs'), 10);
+    if (!state.running) state.remainingMs = null;
+    broadcastState();
+    render();
+  });
+
+  chipWrap.addEventListener('dblclick', () => {
+    if (!isHost || state.revealed) return;
+    state.running = false;
+    state.revealed = true;
+    broadcastState();
+    render();
+  });
+
+  function showResults(){
+    const players = Object.values(state.players);
+    const voted = players.filter(p => p.vote && p.vote !== '?' && p.vote !== '☕');
+    resultsList.innerHTML = "";
+    players.forEach(p => {
+      const chip = document.createElement('div');
+      chip.className = 'result-chip';
+      chip.innerHTML = `${escapeHtml(p.name)} <b>${p.vote ? p.vote : '—'}</b>`;
+      resultsList.appendChild(chip);
+    });
+    if (voted.length){
+      const nums = voted.map(p => parseFloat(p.vote)).filter(n => !isNaN(n));
+      const avg = nums.length ? (nums.reduce((a,b)=>a+b,0) / nums.length) : null;
+      avgBadge.textContent = avg !== null ? `avg ${avg.toFixed(1)}` : "";
+      const allSame = voted.every(p => p.vote === voted[0].vote) && voted.length === players.length;
+      consensusFlag.textContent = allSame && players.length > 1
+        ? "Consensus reached — everyone's aligned."
+        : "Spread the estimates and talk through the gap before locking it in.";
+    } else {
+      avgBadge.textContent = "";
+      consensusFlag.textContent = "No votes cast this round.";
+    }
+    resultsBox.classList.add('show');
+  }
+
+  // ================= Audio: generative table music + chime =================
+  let audioStarted = false;
+  let musicLoop = null;
+  let padSynth = null;
+  let plinkSynth = null;
+  let musicOn = true;
+  let musicPlaying = false;
+
+  function ensureAudioStarted(){
+    if (audioStarted) return;
+    if (typeof Tone === 'undefined') return;
+    Tone.start();
+    audioStarted = true;
+    padSynth = new Tone.PolySynth(Tone.FMSynth, {
+      volume: -18,
+      envelope: { attack: 1.2, decay: 0.6, sustain: 0.6, release: 2.2 }
+    }).toDestination();
+    plinkSynth = new Tone.PluckSynth({
+      volume: -22,
+      attackNoise: 0.6,
+      dampening: 3500,
+      resonance: 0.85
+    }).toDestination();
+  }
+
+  const chordPool = [
+    ["C3","E3","G3","B3"],
+    ["A2","C3","E3","G3"],
+    ["F2","A2","C3","E3"],
+    ["G2","B2","D3","F3"]
+  ];
+  const pluckNotes = ["C5","D5","E5","G5","A5"];
+
+  function startMusic(){
+    if (typeof Tone === 'undefined' || !audioStarted || musicPlaying) return;
+    musicPlaying = true;
+    let chordIdx = 0;
+    musicLoop = new Tone.Loop(time => {
+      const chord = chordPool[chordIdx % chordPool.length];
+      padSynth.triggerAttackRelease(chord, "2n", time);
+      chordIdx++;
+      if (Math.random() > 0.4){
+        const note = pluckNotes[Math.floor(Math.random()*pluckNotes.length)];
+        plinkSynth.triggerAttack(note, time + 0.5);
+      }
+    }, "2n").start(0);
+    Tone.Transport.bpm.value = 78;
+    Tone.Transport.start();
+    vinylIcon.classList.add('spinning');
+  }
+
+  function stopMusic(){
+    if (!musicPlaying) return;
+    musicPlaying = false;
+    if (musicLoop){ musicLoop.stop(); musicLoop.dispose(); musicLoop = null; }
+    if (typeof Tone !== 'undefined') Tone.Transport.stop();
+    vinylIcon.classList.remove('spinning');
+  }
+
+  function playChime(){
+    if (typeof Tone === 'undefined' || !audioStarted) return;
+    const bell = new Tone.MetalSynth({
+      volume: -10,
+      envelope: { attack: 0.001, decay: 1.2, release: 0.4 },
+      harmonicity: 5.1,
+      modulationIndex: 16,
+      resonance: 2000,
+      octaves: 1.2
+    }).toDestination();
+    const now = Tone.now();
+    bell.triggerAttack("C5", now);
+    bell.triggerAttack("E5", now + 0.15);
+    bell.triggerAttack("G5", now + 0.3);
+    setTimeout(() => bell.dispose(), 3000);
+  }
+
+  let wasRunning = false;
+  function syncMusicToState(){
+    if (state.running && musicOn) startMusic();
+    else stopMusic();
+    if (wasRunning && !state.running && state.revealed) playChime();
+    wasRunning = state.running;
+  }
+
+  musicToggle.addEventListener('click', () => {
+    musicOn = !musicOn;
+    musicLabel.textContent = musicOn ? "Table music: on" : "Table music: off";
+    if (!musicOn) stopMusic();
+    else if (state.running) startMusic();
+  });
+
+})();
+</script>
+
+</body>
+</html>
