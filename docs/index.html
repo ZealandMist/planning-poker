@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Table Stakes — Planning Poker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+
+<!-- Music -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+<!-- Firebase (compat build — no bundler needed) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Round &amp; Reveal</div>
+  <h1>Table <em>Stakes</em></h1>
+  <p class="subtitle">Planning poker with a chip timer and a table that hums while the clock runs.</p>
+</header>
+
+<!-- Shown only if firebase-config.js still has placeholder values -->
+<div class="setup-banner hidden" id="setupBanner">
+  <strong>Setup needed:</strong> open <code>firebase-config.js</code> and paste in your own Firebase
+  project's config (see the comments in that file for a 3-step guide). Nothing will connect until that's filled in.
+</div>
+
+<!-- ================= LOBBY ================= -->
+<div class="lobby-card" id="lobbyCard">
+  <div class="role-tabs" id="roleTabs">
+    <button type="button" data-role="host" class="active">Host a session</button>
+    <button type="button" data-role="join">Join a session</button>
+  </div>
+
+  <label class="field-label" for="nameInput">Your name</label>
+  <input id="nameInput" type="text" placeholder="e.g. Priya" maxlength="24" autocomplete="off">
+
+  <div id="joinCodeField">
+    <label class="field-label" for="codeInput">Session code</label>
+    <input id="codeInput" type="text" placeholder="e.g. TS-A1B2C3" maxlength="20" autocomplete="off">
+  </div>
+
+  <button class="btn primary lobby-submit" id="lobbySubmit">Start hosting</button>
+  <div class="lobby-error" id="lobbyError"></div>
+  <p class="lobby-note" id="lobbyNote">You'll get a session code to share. Anyone with the link or code can join from their own device.</p>
+</div>
+
+<!-- ================= SESSION BAR ================= -->
+<div class="session-bar hidden" id="sessionBar">
+  <span class="role-badge" id="roleBadgeConn"><span class="conn-dot" id="connDot"></span><span id="connCountLabel">1 at the table</span></span>
+  <div class="code-pill">
+    Code: <b id="codeDisplay">—</b>
+    <button id="copyLinkBtn" type="button">Copy invite link</button>
+  </div>
+  <span class="role-badge" id="roleBadgeSelf"></span>
+  <button class="claim-host-btn hidden" id="claimHostBtn" type="button">Become host</button>
+  <button class="leave-link" id="leaveBtn">Leave</button>
+</div>
+
+<main class="hidden" id="appMain">
+
+  <div class="story-row">
+    <input id="storyInput" type="text" placeholder="What are we estimating? (e.g. JIRA-142: refactor auth)" maxlength="120">
+  </div>
+
+  <div class="chip-wrap" id="chipWrap">
+    <svg viewBox="0 0 216 216">
+      <defs>
+        <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#f6bad3"/>
+          <stop offset="100%" stop-color="#da97d4"/>
+        </linearGradient>
+      </defs>
+      <circle class="chip-track" cx="108" cy="108" r="96"></circle>
+      <circle class="chip-progress" id="chipProgress" cx="108" cy="108" r="96"
+        stroke-dasharray="603.19" stroke-dashoffset="0"></circle>
+    </svg>
+    <div class="chip-face">
+      <div class="timer-digits" id="timerDigits">01:00</div>
+      <div class="timer-state" id="timerState">Ready</div>
+    </div>
+  </div>
+
+  <div class="controls" id="hostTimerControls">
+    <div class="duration-select" id="durationSelect">
+      <button data-secs="30">30s</button>
+      <button data-secs="60" class="active">60s</button>
+      <button data-secs="90">90s</button>
+      <button data-secs="120">2m</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div id="hostButtonsWrap" class="controls" style="gap:14px;">
+      <button class="btn primary" id="startBtn">Start Round</button>
+      <button class="btn" id="pauseBtn" disabled>Pause</button>
+      <button class="btn" id="revealBtn">Reveal Now</button>
+    </div>
+    <div class="waiting-note hidden" id="guestWaitingNote">Only the host controls the timer.</div>
+    <div class="vinyl-toggle" id="musicToggle">
+      <div class="vinyl" id="vinylIcon"></div>
+      <span id="musicLabel">Table music: on</span>
+    </div>
+  </div>
+
+  <section class="players-section">
+    <div class="section-label">Players at the table</div>
+    <div class="players-grid" id="playersGrid"></div>
+  </section>
+
+  <section class="deck-section">
+    <div class="section-label">The deck</div>
+    <div class="current-voter" id="currentVoter"></div>
+    <div class="deck-fan" id="deckFan"></div>
+  </section>
+
+  <div class="results" id="results">
+    <div class="results-header">
+      <h3>Reveal</h3>
+      <div class="avg-badge" id="avgBadge"></div>
+    </div>
+    <div class="results-list" id="resultsList"></div>
+    <div class="consensus-flag" id="consensusFlag"></div>
+  </div>
+
+</main>
+
+<footer id="pageFooter">Synced through your own Firebase project — no peer-to-peer, no VPN headaches.</footer>
+
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
