@@ -1,0 +1,29 @@
+# Firebase / local config
+.database/
+.firebaserc.local
+.firebase/
+firebase-debug.log*
+serviceAccountKey.json
+/database.rules.json
+
+# Local environment files
+.env
+.env.*
+*.local
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+*.swo
+
+# Node tooling (safe even if not used here)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# If you ever create local DB or generated data files
+*.sqlite
+*.db
