@@ -596,6 +596,7 @@
   }
 
   function playChime(){
+    if(!musicOn) return;
     if (typeof Tone === 'undefined' || !audioStarted) return;
     const bell = new Tone.MetalSynth({
       volume: -10,
@@ -622,7 +623,7 @@
 
   musicToggle.addEventListener('click', () => {
     musicOn = !musicOn;
-    musicLabel.textContent = musicOn ? "Table music: on" : "Table music: off";
+    musicLabel.textContent = musicOn ? "Sound: on" : "Sound: off";
     if (!musicOn) stopMusic();
     else if (state.running) startMusic();
   });
