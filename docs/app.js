@@ -1,6 +1,7 @@
 (function(){
   const DECK = ["0","1","2","3","5","8","13","21","?","☕"];
   const CIRC = 2 * Math.PI * 96;
+  const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 
   // ---------- DOM refs ----------
   const setupBanner = document.getElementById('setupBanner');
@@ -93,7 +94,8 @@
     running: false,
     endAt: null,
     remainingMs: null,
-    revealed: false
+    revealed: false,
+    expiresAt: null
   };
 
   function uid(len){
@@ -164,6 +166,9 @@
   }
 
   function showApp(){
+    const url = new URL(location.href);
+    url.searchParams.set('session', sessionCode);
+    history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString() + url.hash);
     lobbyCard.classList.add('hidden');
     sessionBar.classList.remove('hidden');
     appMain.classList.remove('hidden');
@@ -186,6 +191,7 @@
 
       const initial = {
         hostId: myId,
+        expiresAt: Date.now() + SESSION_TTL_MS,
         story: "",
         durationSecs: 60,
         running: false,
@@ -213,12 +219,17 @@
 
   // ================= GUEST =================
   function joinSession(code){
-    sessionCode = code;
-    sessionRef = db.ref('sessions/' + code);
+    sessionCode = code.trim().toUpperCase();
+    sessionRef = db.ref('sessions/' + sessionCode);
 
     sessionRef.get().then(snap => {
-      if (!snap.exists()){
+      const session = snap.val();
+      if (!snap.exists() || !session){
         lobbyFail("No session found with that code. Double-check it with the host.");
+        return;
+      }
+      if (session.expiresAt && session.expiresAt <= Date.now()){
+        lobbyFail("That session has expired. Ask the host to start a new one.");
         return;
       }
       myId = auth.currentUser.uid;
@@ -254,12 +265,35 @@
       state.endAt = val.endAt || null;
       state.remainingMs = (val.remainingMs != null) ? val.remainingMs : null;
       state.revealed = !!val.revealed;
+      state.expiresAt = val.expiresAt || null;
       state.players = val.players || {};
+      if (state.expiresAt && state.expiresAt <= Date.now()){
+        leaveExpiredSession();
+        return;
+      }
+      scheduleSessionExpiry();
       isHost = (state.hostId === myId);
       render();
     }, err => {
       console.error('[table-stakes] realtime listener error:', err);
     });
+  }
+
+  let expirationTimer = null;
+
+  function leaveExpiredSession(){
+    if (expirationTimer) clearTimeout(expirationTimer);
+    if (presenceRef) presenceRef.remove();
+    if (sessionRef) sessionRef.off();
+    alert("This session has expired. Ask the host to start a new one.");
+    location.href = location.pathname;
+  }
+
+  function scheduleSessionExpiry(){
+    if (expirationTimer) clearTimeout(expirationTimer);
+    if (!state.expiresAt) return;
+    const delay = state.expiresAt - Date.now();
+    expirationTimer = setTimeout(leaveExpiredSession, Math.max(0, delay));
   }
 
   // ================= Claim host (if host disconnected) =================
@@ -303,13 +337,15 @@
   });
 
   copyLinkBtn.addEventListener('click', () => {
-    const url = location.origin + location.pathname + '?session=' + encodeURIComponent(sessionCode);
-    navigator.clipboard.writeText(url).then(() => {
+    const url = new URL(location.href);
+    url.searchParams.set('session', sessionCode);
+    const inviteUrl = url.toString();
+    navigator.clipboard.writeText(inviteUrl).then(() => {
       const original = copyLinkBtn.textContent;
       copyLinkBtn.textContent = 'Copied!';
       setTimeout(() => copyLinkBtn.textContent = original, 1500);
     }).catch(() => {
-      prompt("Copy this invite link:", url);
+      prompt("Copy this invite link:", inviteUrl);
     });
   });
 
