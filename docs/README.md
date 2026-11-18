@@ -11,6 +11,7 @@ table via Firebase.
 - `app.js` — all app logic (session handling, timer, voting, music)
 - `firebase-config.js` — the only file you need to edit to point this at your own Firebase project
 - `database.rules.json` — the security rules to paste into your Firebase project
+- `../functions/index.js` — scheduled cleanup for sessions older than six hours
 
 ## 1. Set up Firebase (~10 minutes, free)
 
@@ -31,6 +32,23 @@ table via Firebase.
    click the `</>` (web) icon to register a new web app.
 6. Copy the `firebaseConfig` object it shows you and paste the values into
    `firebase-config.js`.
+
+### Expiring abandoned sessions
+
+Each session receives a six-hour `expiresAt` timestamp when it is created. The
+browser stops expired links from being joined, but the scheduled Firebase
+function is what permanently removes expired sessions for everyone.
+
+From the repository root, install the Functions dependencies and deploy the
+function to the same Firebase project:
+
+```
+npm install --prefix functions
+npx firebase-tools deploy --project YOUR_PROJECT_ID --only functions:removeExpiredSessions
+```
+
+The scheduled function runs every 15 minutes, so cleanup can occur up to about
+15 minutes after the six-hour expiration.
 
 ### About the config values and "exposed keys"
 
@@ -79,6 +97,20 @@ npx serve .
 
 Then open the printed `http://localhost:...` URL in two windows to test
 hosting and joining.
+
+## Running tests
+
+From the repository root:
+
+```
+npm install
+npx playwright install chromium
+npm test
+```
+
+The tests use a mocked Firebase client and do not create or modify real
+sessions. They cover invite-link consistency, expired-session rejection, and
+scheduled cleanup selection.
 
 ## How it works
 
